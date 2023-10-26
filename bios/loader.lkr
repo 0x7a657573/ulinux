@@ -1,0 +1,23 @@
+
+MEMORY
+{
+	code  : ORIGIN = 0xbfc00000, LENGTH = 0x1000
+	ram   : ORIGIN = 0x80000000, LENGTH = 0x1000
+	trash : ORIGIN = 0xffff0000, LENGTH = 64K
+}
+
+SECTIONS
+{
+
+	.text : { *(.vecs) *(.vecs.*) ; *(.text) *(.text.*) ; }  > code
+	.rodata : { *(.rodata) *(.rodata.*) ; . = ALIGN(4); __data_data = ABSOLUTE(.) ; }  > code
+
+	
+	.bss  :  { . = ALIGN(4); __bss_start  = ABSOLUTE(.) ; *(.bss) *(.bss.*) *(COMMON) ; . = ALIGN(4); __bss_end  = ABSOLUTE(.) ; } > ram
+	
+	.trash1 : { *(.init) *(.init.*) ; *(.fini) *(.fini.*) ; }  > trash
+}
+
+
+
+ENTRY(entry)
