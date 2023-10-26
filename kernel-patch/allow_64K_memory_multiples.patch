@@ -1,0 +1,19 @@
+commit ede242b2bb84084e1f4440782cc188e95d845bfb
+Author: Dmitry Grinberg <dmitrygr@gmail.com>
+Date:   Thu Jul 28 20:35:11 2022 -0500
+
+    testh for memory in smaller pieces to allow us 1-MB granularity
+
+diff --git a/arch/mips/dec/prom/memory.c b/arch/mips/dec/prom/memory.c
+index 8c62316f..bad9166a 100644
+--- a/arch/mips/dec/prom/memory.c
++++ b/arch/mips/dec/prom/memory.c
+@@ -25,7 +25,7 @@ volatile unsigned long mem_err;		/* So we know an error occurred */
+  * off the end of real memory.  Only suitable for the 2100/3100's (PMAX).
+  */
+ 
+-#define CHUNK_SIZE 0x400000
++#define CHUNK_SIZE (65536)
+ 
+ static inline void pmax_setup_memory_region(void)
+ {

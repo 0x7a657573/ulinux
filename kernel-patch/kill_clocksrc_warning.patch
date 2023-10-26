@@ -1,0 +1,28 @@
+commit 4662fcd8a939695d2e5bf7a201c09e82ff9a2b6e
+Author: Dmitry Grinberg <dmitrygr@gmail.com>
+Date:   Mon Jun 20 19:19:07 2022 -0500
+
+    remove pointless timesource warning for slow ticks
+
+diff --git a/kernel/time/clocksource.c b/kernel/time/clocksource.c
+index a20368e1..4a07ff1f 100644
+--- a/kernel/time/clocksource.c
++++ b/kernel/time/clocksource.c
+@@ -735,15 +735,15 @@ void __clocksource_update_freq_scale(struct clocksource *cs, u32 scale, u32 freq
+ 		cs->shift--;
+ 		cs->maxadj = clocksource_max_adjustment(cs);
+ 	}
+-
+ 	/*
+ 	 * Only warn for *special* clocksources that self-define
+ 	 * their mult/shift values and don't specify a freq.
+ 	 */
++/* -- noise on uMIPS
+ 	WARN_ONCE(cs->mult + cs->maxadj < cs->mult,
+ 		"timekeeping: Clocksource %s might overflow on 11%% adjustment\n",
+ 		cs->name);
+-
++*/
+ 	clocksource_update_max_deferment(cs);
+ 
+ 	pr_info("%s: mask: 0x%llx max_cycles: 0x%llx, max_idle_ns: %lld ns\n",

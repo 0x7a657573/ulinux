@@ -1,0 +1,105 @@
+commit dd4f49c4ff7250427fba19f60309de26cc9ab5eb
+Author: Dmitry Grinberg <dmitrygr@gmail.com>
+Date:   Sun Dec 12 13:13:32 2021 -0800
+
+    support emulating more fp64 things on mips1
+
+diff --git a/arch/mips/Kconfig b/arch/mips/Kconfig
+index 9f137678..3ae3d042 100644
+--- a/arch/mips/Kconfig
++++ b/arch/mips/Kconfig
+@@ -2723,6 +2723,13 @@ config MIPS_O32_FP64_SUPPORT
+ 
+ 	  If unsure, say N.
+ 
++config MIPS_1_FP64_SUPPORT
++	bool "Support for full FP64 emulation on MIPS I CPUs"
++	depends on (32BIT || MIPS32_O32) && MIPS_O32_FP64_SUPPORT
++	help
++	  Without this, instructions like trunc.w.d  wil not be emulated on
++	  MIPS I CPUs
++
+ config USE_OF
+ 	bool
+ 	select OF
+diff --git a/arch/mips/math-emu/cp1emu.c b/arch/mips/math-emu/cp1emu.c
+index e31fde4b..a311366e 100644
+--- a/arch/mips/math-emu/cp1emu.c
++++ b/arch/mips/math-emu/cp1emu.c
+@@ -53,6 +53,14 @@
+ 
+ #include "ieee754.h"
+ 
++
++#ifdef CONFIG_MIPS_1_FP64_SUPPORT
++	#define acting_cpu_has_mips_2_3_4_5_r	1
++#else
++	#define acting_cpu_has_mips_2_3_4_5_r	cpu_has_mips_2_3_4_5_r
++#endif
++
++
+ /* Function which emulates a floating point instruction. */
+ 
+ static int fpu_emu(struct pt_regs *, struct mips_fpu_struct *,
+@@ -1215,14 +1223,14 @@ emul:
+ 			likely = 0;
+ 			switch (MIPSInst_RT(ir) & 3) {
+ 			case bcfl_op:
+-				if (cpu_has_mips_2_3_4_5_r)
++				if (acting_cpu_has_mips_2_3_4_5_r)
+ 					likely = 1;
+ 				/* Fall through */
+ 			case bcf_op:
+ 				cond = !cond;
+ 				break;
+ 			case bctl_op:
+-				if (cpu_has_mips_2_3_4_5_r)
++				if (acting_cpu_has_mips_2_3_4_5_r)
+ 					likely = 1;
+ 				/* Fall through */
+ 			case bct_op:
+@@ -1287,7 +1295,7 @@ branch_common:
+ 
+ 				case ldc1_op:
+ 				case sdc1_op:
+-					if (cpu_has_mips_2_3_4_5_r)
++					if (acting_cpu_has_mips_2_3_4_5_r)
+ 						goto emul;
+ 
+ 					goto bc_sigill;
+@@ -1692,7 +1700,7 @@ static int fpu_emu(struct pt_regs *xcp, struct mips_fpu_struct *ctx,
+ 
+ 			/* unary  ops */
+ 		case fsqrt_op:
+-			if (!cpu_has_mips_2_3_4_5_r)
++			if (!acting_cpu_has_mips_2_3_4_5_r)
+ 				return SIGILL;
+ 
+ 			handler.u = ieee754sp_sqrt;
+@@ -1933,7 +1941,7 @@ copcsr:
+ 		case ftrunc_op:
+ 		case fceil_op:
+ 		case ffloor_op:
+-			if (!cpu_has_mips_2_3_4_5_r)
++			if (!acting_cpu_has_mips_2_3_4_5_r)
+ 				return SIGILL;
+ 
+ 			oldrm = ieee754_csr.rm;
+@@ -2015,7 +2023,7 @@ copcsr:
+ 
+ 			/* unary  ops */
+ 		case fsqrt_op:
+-			if (!cpu_has_mips_2_3_4_5_r)
++			if (!acting_cpu_has_mips_2_3_4_5_r)
+ 				return SIGILL;
+ 
+ 			handler.u = ieee754dp_sqrt;
+@@ -2231,7 +2239,7 @@ dcopuop:
+ 		case ftrunc_op:
+ 		case fceil_op:
+ 		case ffloor_op:
+-			if (!cpu_has_mips_2_3_4_5_r)
++			if (!acting_cpu_has_mips_2_3_4_5_r)
+ 				return SIGILL;
+ 
+ 			oldrm = ieee754_csr.rm;

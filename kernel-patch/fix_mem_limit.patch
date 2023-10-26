@@ -1,0 +1,19 @@
+commit 91aa935a527d88e8fd5f40acd271164a3e8f1ae7
+Author: Dmitry Grinberg <dmitrygr@gmail.com>
+Date:   Tue Aug 30 01:25:29 2022 -0500
+
+    fix pmap memory limit to match comment
+
+diff --git a/arch/mips/dec/prom/memory.c b/arch/mips/dec/prom/memory.c
+index bad9166a..4c7d7447 100644
+--- a/arch/mips/dec/prom/memory.c
++++ b/arch/mips/dec/prom/memory.c
+@@ -43,7 +43,7 @@ static inline void pmax_setup_memory_region(void)
+ 	 * FIXME this should be replaced by the first free page!
+ 	 */
+ 	for (memory_page = (unsigned char *)CKSEG1 + CHUNK_SIZE;
+-	     mem_err == 0 && memory_page < (unsigned char *)CKSEG1 + 0x1e00000;
++	     mem_err == 0 && memory_page < (unsigned char *)CKSEG1 + 0x1e000000;
+ 	     memory_page += CHUNK_SIZE) {
+ 		dummy = *memory_page;
+ 	}

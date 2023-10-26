@@ -1,0 +1,272 @@
+commit 495cf92bf84991da02e611f14c7e99649f3870d0
+Author: Dmitry Grinberg <dmitrygr@gmail.com>
+Date:   Fri Dec 3 22:11:38 2021 -0800
+
+    add pvd device
+
+diff --git a/drivers/block/Kconfig b/drivers/block/Kconfig
+index 324abc8d..9f4cdf72 100644
+--- a/drivers/block/Kconfig
++++ b/drivers/block/Kconfig
+@@ -501,6 +501,12 @@ config XEN_BLKDEV_BACKEND
+ 	  will be called xen-blkback.
+ 
+ 
++config PVDISK_BLK
++	tristate "PVDisk driver"
++	depends on MIPS
++	---help---
++	  Host block device for uMIPS
++
+ config VIRTIO_BLK
+ 	tristate "Virtio block driver"
+ 	depends on VIRTIO
+diff --git a/drivers/block/Makefile b/drivers/block/Makefile
+index 67132902..917bc5ae 100644
+--- a/drivers/block/Makefile
++++ b/drivers/block/Makefile
+@@ -30,6 +30,8 @@ obj-$(CONFIG_BLK_DEV_NBD)	+= nbd.o
+ obj-$(CONFIG_BLK_DEV_CRYPTOLOOP) += cryptoloop.o
+ obj-$(CONFIG_VIRTIO_BLK)	+= virtio_blk.o
+ 
++obj-$(CONFIG_PVDISK_BLK)	+= pvdisk.o pvdisk-asm.o
++
+ obj-$(CONFIG_BLK_DEV_SX8)	+= sx8.o
+ obj-$(CONFIG_BLK_DEV_HD)	+= hd.o
+ 
+diff --git a/drivers/block/pvdisk-asm.S b/drivers/block/pvdisk-asm.S
+new file mode 100755
+index 00000000..5e5cee4b
+--- /dev/null
++++ b/drivers/block/pvdisk-asm.S
+@@ -0,0 +1,28 @@
++.set noreorder
++.set noat
++
++
++#define HYPERCALL			0x4f646776
++#define H_STOR_GET_SZ		2
++#define H_STOR_READ			3
++#define H_STOR_WRITE		4
++
++.globl pvd_getsize
++pvd_getsize:
++	li    $at, H_STOR_GET_SZ
++	jr    $ra
++	.word HYPERCALL
++
++.globl pvd_writeblock
++pvd_writeblock:		//(a0 = block number, a1 = source PA)
++	li    $at, H_STOR_WRITE
++	jr    $ra
++	.word HYPERCALL
++
++
++
++.globl pvd_readblock
++pvd_readblock:		//(a0 = block number, a1 = destination PA)
++	li    $at, H_STOR_READ
++	jr    $ra
++	.word HYPERCALL
+diff --git a/drivers/block/pvdisk.c b/drivers/block/pvdisk.c
+new file mode 100755
+index 00000000..d1b6e15b
+--- /dev/null
++++ b/drivers/block/pvdisk.c
+@@ -0,0 +1,196 @@
++#include <linux/module.h>
++#include <linux/kernel.h>
++#include <linux/mtd/mtd.h>
++#include <linux/mtd/partitions.h>
++#include <linux/genhd.h>
++#include <linux/blkdev.h>
++#include <linux/hdreg.h>
++#include <linux/kthread.h>
++#include <linux/sched.h>
++#include <linux/wait.h>
++#include <linux/kthread.h>
++#include <linux/reboot.h>
++#include <linux/notifier.h>
++#include <linux/fb.h>
++#include <asm/page.h>
++#include <asm/page.h>
++
++
++extern uint32_t pvd_getsize(void);
++extern bool pvd_writeblock(uint32_t blkNo, uintptr_t sourceDataPA);
++extern bool pvd_readblock(uint32_t blkNo, uintptr_t dstDataPA);
++
++
++
++/* Magic values */
++
++	#define NUM_MINORS		4
++	#define DISK_NAME		"pvd"
++
++	#define DRIVER_NAME		"pvd"
++	#define DRIVER_DESC		"pvDisk"
++
++/* Globals */
++
++	DEFINE_SPINLOCK(g_slock);		//our lock
++	static struct gendisk* g_disk;		//the disk device
++	static unsigned long g_numSec;
++
++
++static void pvd_do_read(struct request *req)
++{
++	do {
++		uint32_t curSec = blk_rq_pos(req);
++
++	//	printk("PVD** read sec %u -> 0x%08x\n", (unsigned)curSec, (unsigned)dst);
++
++		if (!pvd_readblock(curSec, bio_to_phys(req->bio))) {
++			__blk_end_request(req, -EIO , 0);
++			return;
++		}
++
++	} while (__blk_end_request(req, 0, SECTOR_SIZE));
++}
++
++static void pvd_do_write(struct request *req)
++{
++	do {
++		uint32_t curSec = blk_rq_pos(req);
++
++	//	printk("PVD** write sec %u <- 0x%08x\n", (unsigned)curSec, (unsigned)dst);
++
++		if (!pvd_writeblock(curSec, bio_to_phys(req->bio))) {
++			__blk_end_request(req, -EIO , 0);
++			return;
++		}
++
++	} while (__blk_end_request(req, 0, SECTOR_SIZE));
++}
++
++static void pvd_request(struct request_queue *q)
++{
++	struct request *req = NULL;
++
++	while ((req = blk_fetch_request(q)) != 0) {
++	
++		if (req->cmd_type == REQ_TYPE_FS) {
++
++			switch (rq_data_dir(req)){
++				case READ:
++					pvd_do_read(req);
++					break;
++
++				case WRITE:
++					pvd_do_write(req);
++					break;
++
++				default:
++					blk_end_request_all(req, -EIO);
++					break;
++			}
++		}
++	}
++}
++
++
++static int pvd_ioctl(struct block_device* dev, fmode_t mode, unsigned int cmd, unsigned long arg)
++{
++	int ret = 0;
++
++	if (cmd == HDIO_GETGEO){
++
++		struct hd_geometry geo;
++
++		geo.cylinders = 1;	//it is unsigned short so we'd never really return a good value here - might as well just do this
++		geo.heads = 4;
++		geo.sectors = 16;
++		if (copy_to_user((void __user *) arg, &geo, sizeof(geo))) ret = -EFAULT;
++	}
++	else
++		ret = -ENOTTY;
++
++	return ret;
++}
++
++static struct block_device_operations disk_ops = {
++	.owner =	THIS_MODULE,
++	.ioctl =	pvd_ioctl,
++};
++
++static int __init pvd_init(void)
++{
++	struct request_queue *q;
++	int major, ret = 0;
++
++	g_numSec = pvd_getsize();
++
++	printk("PVD: found device with %ld sectors\n", g_numSec);
++
++	major = register_blkdev(0, DRIVER_NAME);
++	if (major <= 0) {
++		pr_err("PVD: failed to allocate a major number: %d\n", major);
++		ret = -ENOMEM;
++		goto out1;
++	}
++	printk("PVD: Allocated major number %d for PVD device\n", major);
++
++	g_disk = alloc_disk(NUM_MINORS);
++	if (!g_disk) {
++		pr_err("PVD: failed to allocate a gen_disk\n");
++		ret = -ENOMEM;
++		goto out2;
++	}
++
++	q = blk_init_queue(pvd_request, &g_slock);
++	if (!q) {
++		pr_err("PVD: failed to allocate a request queue\n");
++		ret = -ENOMEM;
++		goto out3;
++	}
++
++	blk_queue_bounce_limit(q, BLK_BOUNCE_HIGH);
++
++	g_disk->major = major;
++	g_disk->first_minor = 0;
++	strcpy(g_disk->disk_name, DISK_NAME);
++	g_disk->fops = &disk_ops;	//todo:
++	g_disk->queue = q;
++	g_disk->flags = 0;
++
++	blk_queue_logical_block_size(q, SECTOR_SIZE);
++	set_capacity(g_disk, (((loff_t)g_numSec) * ((loff_t)SECTOR_SIZE)) >> 9);
++
++	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, q);	//we're not a rotary medium - do not waste time reordering requests
++
++	add_disk(g_disk);
++
++	return 0;
++
++out3:
++	del_gendisk(g_disk);
++out2:
++	unregister_blkdev(major, DRIVER_NAME);
++out1:
++	return ret;
++}
++
++static void __exit pvd_exit(void)
++{
++	struct request_queue *q = g_disk->queue;
++	int major = g_disk->major;
++
++	del_gendisk(g_disk);
++	put_disk(g_disk);
++	blk_cleanup_queue(q);
++	unregister_blkdev(major, DRIVER_NAME);
++}
++
++
++module_init(pvd_init);
++module_exit(pvd_exit);
++
++MODULE_LICENSE("GPL");
++MODULE_AUTHOR("Dmitry Grinberg, 2021");
++MODULE_DESCRIPTION(DRIVER_DESC);
++
++

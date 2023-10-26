@@ -1,0 +1,59 @@
+commit 38f4de5eef29ab83fe3aaa0930da9ecb27695466
+Author: Dmitry Grinberg <dmitrygr@gmail.com>
+Date:   Thu Dec 30 18:42:03 2021 -0800
+
+    do not build micromips/mips16 exc handling code for CPUs that lack such support
+
+diff --git a/arch/mips/kernel/branch.c b/arch/mips/kernel/branch.c
+index a2e9ad37..09eedfe9 100644
+--- a/arch/mips/kernel/branch.c
++++ b/arch/mips/kernel/branch.c
+@@ -57,6 +57,7 @@ static const unsigned int reg16to32map[8] = {16, 17, 2, 3, 4, 5, 6, 7};
+ int __mm_isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
+ 		       unsigned long *contpc)
+ {
++#ifdef SYS_SUPPORTS_MICROMIPS
+ 	union mips_instruction insn = (union mips_instruction)dec_insn.insn;
+ 	int bc_false = 0;
+ 	unsigned int fcr31;
+@@ -244,6 +245,7 @@ int __mm_isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
+ 		set_isa16_mode(*contpc);
+ 		return 1;
+ 	}
++#endif
+ 	return 0;
+ }
+ 
+@@ -255,6 +257,7 @@ int __mm_isBranchInstr(struct pt_regs *regs, struct mm_decoded_insn dec_insn,
+  */
+ int __microMIPS_compute_return_epc(struct pt_regs *regs)
+ {
++#ifdef SYS_SUPPORTS_MICROMIPS
+ 	u16 __user *pc16;
+ 	u16 halfword;
+ 	unsigned int word;
+@@ -302,6 +305,7 @@ int __microMIPS_compute_return_epc(struct pt_regs *regs)
+ 
+ sigsegv:
+ 	force_sig(SIGSEGV, current);
++#endif
+ 	return -EFAULT;
+ }
+ 
+@@ -313,6 +317,7 @@ sigsegv:
+  */
+ int __MIPS16e_compute_return_epc(struct pt_regs *regs)
+ {
++#ifdef SYS_SUPPORTS_MIPS16
+ 	u16 __user *addr;
+ 	union mips16e_instruction inst;
+ 	u16 inst2;
+@@ -389,7 +394,7 @@ int __MIPS16e_compute_return_epc(struct pt_regs *regs)
+ 	 * Branches do not cause an exception.
+ 	 */
+ 	regs->cp0_epc += 2;
+-
++#endif
+ 	return 0;
+ }
+ 
